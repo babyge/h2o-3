@@ -43,7 +43,7 @@ public class ThinPlateRegressionUtils {
    * @param m
    * @return
    */
-  public static List<Integer[]> findPolybasis(int d, int m) {
+  public static List<Integer[]> findPolyBasis(int d, int m) {
     int polyOrder = m-1;
     int[] possibleDegree = new int[polyOrder];
     for (int index = 1; index < m; index++) // generate all polynomial orders

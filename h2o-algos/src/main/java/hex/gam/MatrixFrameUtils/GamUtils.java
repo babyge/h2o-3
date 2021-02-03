@@ -189,9 +189,10 @@ public class GamUtils {
     parms._M = MemoryManager.malloc4(thinPlateNum);
     int countThinPlate = 0;
     for (int index = 0; index < numGamCols; index++) {
-      if (parms._bs_sorted[index] == 1) { // todo: add in bs==2 when it is supported
-        parms._m[countThinPlate] = calculatem(parms._gamPredSize[index]);
-        parms._M[countThinPlate] = calculateM(parms._gamPredSize[index], parms._m[countThinPlate]);
+      if (parms._bs[index] == 1) { // todo: add in bs==2 when it is supported
+        int d = parms._gam_columns[index].length;
+        parms._m[countThinPlate] = calculatem(d);
+        parms._M[countThinPlate] = calculateM(d, parms._m[countThinPlate]);
         countThinPlate++;
       }
     }
@@ -203,10 +204,11 @@ public class GamUtils {
     int csCount = 0;
     parms._gamPredSize = MemoryManager.malloc4(numGamCols);
     for (int index = 0; index < numGamCols; index++) {
-      if (parms._gam_columns[index].length == 1) // CS
-        parms._gamPredSize[csCount++] = 1; 
-      else   // TP
+      if (parms._gam_columns[index].length == 1) { // CS
+        parms._gamPredSize[csCount++] = 1;
+      } else {  // TP
         parms._gamPredSize[tpCount++] = parms._gam_columns[index].length;
+      }
     }
   }
 

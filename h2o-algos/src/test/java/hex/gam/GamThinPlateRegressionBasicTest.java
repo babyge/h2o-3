@@ -2,6 +2,7 @@ package hex.gam;
 
 import Jama.Matrix;
 import Jama.QRDecomposition;
+import hex.gam.GamSplines.ThinPlateDistanceWithKnots;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import water.DKV;
@@ -16,17 +17,21 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static hex.gam.GAMModel.GAMParameters;
+import static hex.gam.GAMModel.GAMModelOutput;
 import static hex.gam.GamSplines.ThinPlateRegressionUtils.*;
+import static hex.genmodel.algos.gam.GamUtilsThinPlateRegression.calculateDistance;
 import static hex.util.LinearAlgebraUtils.generateOrthogonalComplement;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static water.util.ArrayUtils.innerProduct;
-import static water.util.ArrayUtils.sum;
+import static water.util.ArrayUtils.*;
 
 @RunWith(H2ORunner.class)
 @CloudSize(1)
 public class GamThinPlateRegressionBasicTest extends TestUtil {
   public static final double MAGEPS = 1e-10;
+  
+  // test correct generation of orthogonal matrix zCS
   @Test
   public void testGenOrthComplement() {
     double[][] matT = new double[][]{{1.0, -19.8, -1.99}, {1.0, -0.97, -0.98}, {1.0, 0.031, 0.03}, {1.0, 0.06, 0.05},
@@ -53,7 +58,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     }
   }
 
-  // test with multinomial
+  // test with multinomial with only thin plate regressioon smoothers with one predictors only
   @Test
   public void testTP1D() {
     Scope.enter();
@@ -63,7 +68,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       String[][] gamCols = new String[][]{{"C6"}, {"C7"}, {"C8"}};
       train.replace((10), train.vec(10).toCategoricalVec()).remove();
       DKV.put(train);
-      GAMModel.GAMParameters params = new GAMModel.GAMParameters();
+      GAMParameters params = new GAMParameters();
       int k = 10;
       params._response_column = "C11";
       params._ignored_columns = ignoredCols;
@@ -78,23 +83,24 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       // check starT is of size k x M
       assertTrue((gam._output._starT[0].length == k) && (gam._output._starT[0][0].length == params._M[0]));
       // check penalty_CS is size k x k
-      assertTrue((gam._output._penalty_mat_CS[0].length == (k-params._M[0])) &&
-              (gam._output._penalty_mat_CS[0][0].length == (k-params._M[0])));
+      assertTrue((gam._output._penaltyMatCS[0].length == (k-params._M[0])) &&
+              (gam._output._penaltyMatCS[0][0].length == (k-params._M[0])));
       Scope.track_generic(gam);
     } finally {
       Scope.exit();
     }
   }
 
-  // test with Gaussian
+  // test with Gaussian with only thin plate regression smoothers with two predictors.  
   @Test
-  public void testTP2D() {
+  public void testTP2DNTransform() {
     Scope.enter();
     try {
       Frame train = Scope.track(parse_test_file("smalldata/glm_test/gaussian_20cols_10000Rows.csv"));
-      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
+      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12", 
+              "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
       String[][] gamCols = new String[][]{{"C11", "C12"}, {"C13", "C14"}};
-      GAMModel.GAMParameters params = new GAMModel.GAMParameters();
+      GAMParameters params = new GAMParameters();
       int k = 10;
       params._response_column = "C21";
       params._ignored_columns = ignoredCols;
@@ -107,20 +113,21 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     //  params._lambda = new double[]{10};
       params._lambda_search = true;
       GAMModel gam = new GAM(params).trainModel().get();
+      Scope.track_generic(gam);
       // check starT is of size k x M
       assertTrue((gam._output._starT[0].length == k) && (gam._output._starT[0][0].length == params._M[0]));
       // check penalty_CS is size k x k
-      assertTrue((gam._output._penalty_mat_CS[0].length == (k-params._M[0])) &&
-              (gam._output._penalty_mat_CS[0][0].length == (k-params._M[0])));
-      Scope.track_generic(gam);
+      assertTrue((gam._output._penaltyMatCS[0].length == (k-params._M[0])) &&
+              (gam._output._penaltyMatCS[0][0].length == (k-params._M[0])));
     } finally {
       Scope.exit();
     }
   }
-
-  // test with binomial
+  
+  // test with binomial for thin plate regression smoothers with three predictors and check that the polynomials
+  // are generated correctly by checking starT values
   @Test
-  public void testTP3D() {
+  public void testTP3DStarT() {
     Scope.enter();
     try {
       Frame train = Scope.track(parse_test_file("smalldata/glm_test/binomial_20_cols_10KRows.csv"));
@@ -128,7 +135,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       DKV.put(train);
       String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
       String[][] gamCols = new String[][]{{"C11", "C12", "C13"}, {"C14", "C15", "C16"}, {"C17", "C18", "C19"}};
-      GAMModel.GAMParameters params = new GAMModel.GAMParameters();
+      GAMParameters params = new GAMParameters();
       int k = 12;
       params._response_column = "C21";
       params._ignored_columns = ignoredCols;
@@ -140,25 +147,58 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       params._savePenaltyMat = true;
       params._lambda_search = true;
       GAMModel gam = new GAM(params).trainModel().get();
+      Scope.track_generic(gam);
       // check starT is of size k x M
       assertTrue((gam._output._starT[0].length == k) && (gam._output._starT[0][0].length == params._M[0]));
       // check penalty_CS is size k x k
-      assertTrue((gam._output._penalty_mat_CS[0].length == (k-params._M[0])) &&
-              (gam._output._penalty_mat_CS[0][0].length == (k-params._M[0])));
-      Scope.track_generic(gam);
+      assertTrue((gam._output._penaltyMatCS[0].length == (k - params._M[0])) &&
+              (gam._output._penaltyMatCS[0][0].length == (k - params._M[0])));
+      // check and make sure polynomials are generated correctly by checking starT
+      for (int gamInd = 0; gamInd < gamCols.length; gamInd++) {
+        assertCorrectStarT(gam._output._starT[gamInd], gam._output._knots[gamInd], gamCols[gamInd]);
+      }
     } finally {
       Scope.exit();
     }
   }
   
+  // check correct starT generation for one tp smoother
+  public static void assertCorrectStarT(double[][] starT, double[][] knots, String[] gam_columns) {
+    int d = gam_columns.length;
+    int m = calculatem(d);
+    int M = calculateM(d, m);
+    int numKnots = knots[0].length;
+    int[][] allPolyBasis = convertList2Array(findPolyBasis(d, m), M, d);
+    // manually generate starT here and then compare with starT from argument
+    double[][] starTManual = new double[numKnots][M];
+    for (int rowIndex = 0; rowIndex < numKnots; rowIndex++) {
+      for (int colIndex = 0; colIndex < M; colIndex++) {
+        starTManual[rowIndex][colIndex] = generate1PolyRow(knots, allPolyBasis[colIndex], rowIndex);
+      }
+    }
+    checkDoubleArrays(starT, starTManual, MAGEPS);
+  }
+  
+  public static double generate1PolyRow(double[][] knots, int[] onePolyBasis, int rowIndex) {
+    double temp = 1;
+    int d = onePolyBasis.length;
+    for (int predInd = 0; predInd < d; predInd++) {
+      temp *= Math.pow(knots[predInd][rowIndex], onePolyBasis[predInd]);
+    }
+    return temp;
+  }
+  
+  // test to make sure default knots are generated correctly.
   @Test
   public void testKnotsDefault() {
     Scope.enter();
     try {
       Frame train = Scope.track(parse_test_file("smalldata/glm_test/multinomial_10_classes_10_cols_10000_Rows_train.csv"));
+      train.replace((10), train.vec(10).toCategoricalVec()).remove();
+      DKV.put(train);
       String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
       String[][] gamCols = new String[][]{{"C6"},{"C7", "C8"}, {"C9"}};
-      GAMModel.GAMParameters params = new GAMModel.GAMParameters();
+      GAMParameters params = new GAMParameters();
       int k = 10;
       params._response_column = "C11";
       params._ignored_columns = ignoredCols;
@@ -171,14 +211,15 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       // check starT is of size k x M
       assertTrue((gam._output._starT[0].length == k) && (gam._output._starT[0][0].length == params._M[0]));
       // check penalty_CS is size k x k
-      assertTrue((gam._output._penalty_mat_CS[0].length == (k-params._M[0])) &&
-              (gam._output._penalty_mat_CS[0][0].length == (k-params._M[0])));
+      assertTrue((gam._output._penaltyMatCS[0].length == (k-params._M[0])) &&
+              (gam._output._penaltyMatCS[0][0].length == (k-params._M[0])));
       Scope.track_generic(gam);
     } finally {
       Scope.exit();
     }
   }
   
+  // test correct knot generation from Frames for both CS and TP smoothers
   @Test
   public void testKnotsGenerationFromFrame() {
     Scope.enter();
@@ -208,7 +249,9 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       Frame train = Scope.track(parse_test_file("smalldata/glm_test/multinomial_10_classes_10_cols_10000_Rows_train.csv"));
       String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
       String[][] gamCols = new String[][]{{"C6"},{"C7", "C8"}, {"C9"}};
-      GAMModel.GAMParameters params = new GAMModel.GAMParameters();
+      train.replace((10), train.vec(10).toCategoricalVec()).remove();
+      DKV.put(train);
+      GAMParameters params = new GAMParameters();
       params._knot_ids = new String[]{knotsFrame1._key.toString(), knotsFrame2._key.toString(), knotsFrame3._key.toString()};
       params._bs = new int[]{0,1,0};
       params._response_column = "C11";
@@ -220,13 +263,206 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       // check starT is of size k x M
       assertTrue((gam._output._starT[0].length == k) && (gam._output._starT[0][0].length == params._M[0]));
       // check penalty_CS is size k x k
-      assertTrue((gam._output._penalty_mat_CS[0].length == (k-params._M[0])) &&
-              (gam._output._penalty_mat_CS[0][0].length == (k-params._M[0])));
+      assertTrue((gam._output._penaltyMatCS[0].length == (k-params._M[0])) &&
+              (gam._output._penaltyMatCS[0][0].length == (k-params._M[0])));
       Scope.track_generic(gam);
     } finally {
       Scope.exit();
     }
   }
+
+  // test correct distance measurement of thin plate regression smoothers by checking penalty matrix before any kind of
+  // transformation.
+  @Test
+  public void testDistanceMeasure() {
+    Scope.enter();
+    try {
+      Frame train = Scope.track(parse_test_file("smalldata/glm_test/binomial_20_cols_10KRows.csv"));
+      train.replace((20), train.vec(20).toCategoricalVec()).remove();
+      DKV.put(train);
+      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
+      String[][] gamCols = new String[][]{{"C11"},{"C12", "C13"}, {"C14", "C15", "C16"}};
+      GAMParameters params = new GAMParameters();
+      params._bs = new int[]{1,1,1};
+      params._response_column = "C21";
+      params._ignored_columns = ignoredCols;
+      params._gam_columns = gamCols;
+      params._train = train._key;
+      params._savePenaltyMat = true;
+      GAMModel gam = new GAM(params).trainModel().get();
+      Scope.track_generic(gam);
+      for (int gamInd = 0; gamInd < gamCols.length; gamInd++)
+        assertCorrectDistance(gam._output._penaltyMatrices[gamInd], gam._output._knots[gamInd], gamCols[gamInd]);
+    } finally {
+      Scope.exit();
+    }
+  }
+  
+  // check the calculation of distance for one smoother at a time
+  public static void assertCorrectDistance(double[][] penaltyMat, double[][] knots, String[] gamCols) {
+    int d = gamCols.length;
+    int m = calculatem(d);
+    int numKnots = knots[0].length;
+    double[][] penaltyMatManual = new double[numKnots][numKnots];
+    for (int rowIndex = 0; rowIndex < numKnots; rowIndex++) {
+      for (int colIndex = 0; colIndex < numKnots; colIndex++) {
+        penaltyMatManual[rowIndex][colIndex] = calDistance(knots, rowIndex, colIndex, d, m);
+      }
+    }
+    checkDoubleArrays(penaltyMat, penaltyMatManual, MAGEPS);
+  }
+  
+  public static double calDistance(double[][] knots, int rowIndex, int colIndex, int predNum, int m) {
+    double temp = 0, constant = 1;
+    for (int predInd = 0; predInd < predNum; predInd++) { // calculate distance
+      double diff = knots[predInd][rowIndex]-knots[predInd][colIndex];
+      temp += diff*diff;
+    }
+    double distance = Math.sqrt(temp);
+    // calculate constant to multiply distance
+    if (predNum % 2 == 0) { // d is even
+      constant = Math.pow(-1, m+1+predNum/2)/(Math.pow(2, m-1)*Math.pow(Math.PI, predNum/2)*factorial(m-predNum));
+      if (distance != 0)
+        temp = constant * distance * Math.log(distance);
+      else 
+        temp = 0;
+    } else {  // d is odd
+      constant = Math.pow(-4, m)*factorial(m)*Math.sqrt(Math.PI)/(factorial(2*m)*Math.pow(2,2*m)*Math.pow(Math.PI, 
+              predNum/2.0)*factorial(m-1));
+      temp = constant * distance;
+    }
+    return temp;
+  }
+  
+  // check correct multiplication of zCS and z on data frame
+  @Test
+  public void testTransformData() {
+    Scope.enter();
+    try {
+      Frame train = Scope.track(parse_test_file("smalldata/glm_test/gaussian_20cols_10000Rows.csv"));
+      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12",
+              "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
+      String[][] gamCols = new String[][]{{"C13", "C14", "C15"}, {"C20"}, {"C11", "C12"}};
+      GAMParameters params = new GAMParameters();
+      int k = 10;
+      params._response_column = "C21";
+      params._ignored_columns = ignoredCols;
+      params._num_knots = new int[]{11, k, k};
+      params._gam_columns = gamCols;
+      params._bs = new int[]{1, 1, 1};
+      params._scale = new double[]{1, 1, 1};
+      params._train = train._key;
+      params._savePenaltyMat = true;
+      params._keep_gam_cols = true;
+      params._lambda_search = true;
+      GAMModel gam = new GAM(params).trainModel().get();
+      Scope.track_generic(gam);
+      Frame dataFrame = DKV.getGet(gam._output._gamTransformedTrainCenter); // transformed GAM columns from gam model
+      Scope.track(dataFrame);
+      for (int gamInd = 0; gamInd < gamCols.length; gamInd++)
+        assertCorrectTransform(train, dataFrame, 0.2, gamInd, params, gam._output);
+    } finally {
+      Scope.exit();
+    }
+  }
+  
+  // check correct transformation of data frame by zCS and z for one smoother at a time
+  public static void assertCorrectTransform(Frame data, Frame gamCols, double frac2Test, int gamIndex, 
+                                            GAMParameters parms, GAMModelOutput output) {
+    int numKnot = parms._num_knots_sorted[gamIndex]; // number of gam columns to check
+    int d = parms._gamPredSize[gamIndex];
+    int m = calculatem(d);
+    int M = calculateM(d, m);
+    int finalFrameCol = numKnot - 1;
+    int numKnotsMinusM = numKnot - M;
+    int rowNum2Check = (int) Math.floor(data.numRows()*frac2Test);
+    int rowInd = Math.round(data.numRows()/rowNum2Check);
+    double[][] knots = output._knots[gamIndex];
+    ThinPlateDistanceWithKnots tpDistance = new ThinPlateDistanceWithKnots(knots, d);
+    int[][] allPolyBasis = convertList2Array(findPolyBasis(d, m), M, d);
+    double[] dataInput = new double[d]; // store predictor data before gamification
+    double[] dataDistance = new double[numKnot];  // store data after generating distance
+    double[] dataPoly = new double[M];  // store data after applying polynomial basis
+    double[] dataDistPlusPoly = new double[numKnot];  // store data combining distance and polynomial basis
+    double[][] z = transpose(output._zTranspose[gamIndex]);
+    double[][] zCS = transpose(output._zTransposeCS[gamIndex]);
+    double[] dataOutput = new double[finalFrameCol];  // store gamificed columns from gam model
+    
+    for (int rowIndex = 0; rowIndex < data.numRows(); rowIndex = rowIndex+rowInd) {
+      grabOneRow(data, dataInput, parms._gam_columns_sorted[gamIndex], rowIndex);
+      calculateDistance(dataDistance, dataInput, numKnot, knots, d, (d % 2==0), tpDistance._constantTerms);
+      double[] dataDistanceCS = multVecArr(dataDistance, zCS);
+      generatePolyOneRow(dataInput, allPolyBasis, dataPoly);
+      System.arraycopy(dataDistanceCS, 0, dataDistPlusPoly, 0, numKnotsMinusM);
+      System.arraycopy(dataPoly, 0, dataDistPlusPoly, numKnotsMinusM, M);
+      double[] dataCenterManual = multVecArr(dataDistPlusPoly, z);
+      grabOneRow(gamCols, dataOutput, output._gamColNames[gamIndex], rowIndex); // grab gamified columns from gam
+      // check to make sure the manually generated gamified rows and the gamified columns from gam model
+      checkArrays(dataOutput, dataCenterManual, MAGEPS);
+    }
+  }
+  
+  public static void grabOneRow(Frame data, double[] storeOneRow, String[] gamCols, int rowIndex) {
+    int d = gamCols.length;
+    for (int colIndex = 0; colIndex < d; colIndex++) {
+      storeOneRow[colIndex] = data.vec(gamCols[colIndex]).at(rowIndex);
+    }
+  }
+
+  public static void generatePolyOneRow(double[] dataInput, int[][] onePolyBasis, double[] dataPolyOut) {
+    int d = dataInput.length;
+    int M = onePolyBasis.length;
+    for (int polyInd = 0; polyInd < M; polyInd++) {
+      dataPolyOut[polyInd] = 1.0;
+      for (int predInd = 0; predInd < d; predInd++) {
+        dataPolyOut[polyInd] *= Math.pow(dataInput[predInd], onePolyBasis[polyInd][predInd]);
+      }
+    }
+  }
+  
+  // check correct multiplication of zCS, z on penalty matrix
+  @Test
+  public void testTransformPenaltyMatrix() {
+    Scope.enter();
+    try {
+      Frame train = Scope.track(parse_test_file("smalldata/glm_test/binomial_20_cols_10KRows.csv"));
+      train.replace((20), train.vec(20).toCategoricalVec()).remove();
+      DKV.put(train);
+      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10"};
+      String[][] gamCols = new String[][]{{"C11"},{"C12", "C13"}, {"C14", "C15", "C16"}};
+      GAMParameters params = new GAMParameters();
+      params._bs = new int[]{1,1,1};
+      params._response_column = "C21";
+      params._ignored_columns = ignoredCols;
+      params._gam_columns = gamCols;
+      params._train = train._key;
+      params._savePenaltyMat = true;
+      GAMModel gam = new GAM(params).trainModel().get();
+      Scope.track_generic(gam);
+      for (int gamInd = 0; gamInd < gamCols.length; gamInd++)
+        assertCorrectTransform(gam._output._zTransposeCS[gamInd], gam._output._zTranspose[gamInd], 
+                gam._output._penaltyMatrices[gamInd], gam._output._penaltyMatCS[gamInd], 
+                gam._output._penaltyMatricesCenter[gamInd]);
+    } finally {
+      Scope.exit();
+    }
+  }
+  
+  public static void assertCorrectTransform(double[][] zCST, double[][] zT, double[][] penaltyMat, 
+                                            double[][] penaltyMatCS, double[][] penaltyMatCenter) {
+    int numRow = penaltyMat.length;
+    int numCol = penaltyMat[0].length;
+    double[][] zCS = ArrayUtils.transpose(zCST);
+    // check the application of zCS to penalty matrix is correct;
+    double[][] penaltyMatCSManual = multArrArr(multArrArr(zCST, penaltyMat), zCS);
+    checkDoubleArrays(penaltyMatCS, penaltyMatCSManual, MAGEPS);    
+    double[][] zTChopped = chopOffColumns(zT, penaltyMatCSManual.length);
+    double[][] zChopped = transpose(zTChopped);
+    double[][] penaltyMatCenterManual = multArrArr(multArrArr(zTChopped, penaltyMatCSManual), zChopped);
+    // check the application of zCS to penalty matrix CS is correct;
+    checkDoubleArrays(penaltyMatCenter, penaltyMatCenterManual, MAGEPS);
+  }
+  
   // For a given d, calculate m, then calculate the polynomial basis degree for each predictor involves.
   // However, the 0th order is not included at this stage.
   @Test
@@ -238,7 +474,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       int[] polyOrder = new int[m];
       for (int tempIndex = 0; tempIndex < m; tempIndex++)
         polyOrder[tempIndex] = tempIndex;
-      List<Integer[]> polyBasis = findPolybasis(d[index], m);
+      List<Integer[]> polyBasis = findPolyBasis(d[index], m);
       assertEquals(ans[index], polyBasis.size()); // check and make sure number of basis is correct.  Content checked in testFindPermManyD already
       assertCorrectAllPerms(polyBasis, polyOrder);
     }
@@ -254,7 +490,6 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     assertEquals(26, allCombos.size()); // check correct size
     assertCorrectAllPerms(allCombos, new int[]{0,1,3}); // check correct content
   }
-  
   
   public static void assertCorrectAllPerms(List<Integer[]> allCombos, int[] correctVals) {
     for (Integer[] oneList : allCombos) {
@@ -330,7 +565,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     }
   }
   
-  public int factorial(int n) {
+  public static int factorial(int n) {
     int prod = 1; 
     for (int index = 1; index <= n; index++)
       prod *= index;

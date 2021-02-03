@@ -230,7 +230,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
     else { // check and make sure gam_columns column types are legal
       if (_parms._bs == null)
         setDefaultBSType(_parms);
-      assertLegalGamColumnsNBSTypes();
+      assertLegalGamColumnsNBSTypes();  // number of CS and TP smoothers determined.
     }
     
     if (_parms._scale == null)
@@ -240,6 +240,8 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
       error("gam colum number", "Number of gam columns implied from _bs and _gam_columns do not " +
               "match.");
     setGamPredSize(_parms, _cubicSplineNum);
+    if (_thinPlateSmoothersWithKnotsNum > 0)
+      setThinPlateParameters(_parms, _thinPlateSmoothersWithKnotsNum); // set the m, M for thin plate regression smoothers
     checkOrChooseNumKnots(); // check valid num_knot assignment or choose num_knots
     if ((_parms._num_knots != null) && (_parms._num_knots.length != _parms._gam_columns.length))
       error("gam colum number", "Number of gam columns implied from _num_knots and _gam_columns do" +
@@ -251,8 +253,6 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
     }
     _knots = generateKnotsFromKeys(); // generate knots and verify that they are given correctly
     sortGAMParameters(_parms, _cubicSplineNum, _thinPlateSmoothersWithKnotsNum); // move cubic spline to the front and thin plate to the back
-    if (_thinPlateSmoothersWithKnotsNum > 0)
-      setThinPlateParameters(_parms, _thinPlateSmoothersWithKnotsNum); // set the m, M for thin plate regression smoothers
     checkThinPlateParams();
     if (_parms._saveZMatrix && ((_train.numCols() - 1 + _parms._num_knots.length) < 2))
       error("_saveZMatrix", "can only be enabled if we number of predictors plus" +
@@ -292,9 +292,13 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
             _thinPlateSmoothersWithKnotsNum);
     int tpIndex = 0;
     for (int index = 0; index < _parms._gam_columns.length; index++) {
-        if (_parms._bs_sorted[index] == 1 && _parms._num_knots_sorted[index] < _parms._M[tpIndex]+1)
-          error("num_knots", "num_knots for gam column start with  "+_parms._gam_columns_sorted[index][0]+
-                  " did not specify enough num_knots.  It should be equal or greater than "+(_parms._M[tpIndex++]+1)+".");
+      if (_parms._bs_sorted[index] == 1) {
+        if (_parms._num_knots_sorted[index] < _parms._M[tpIndex] + 1) {
+          error("num_knots", "num_knots for gam column start with  " + _parms._gam_columns_sorted[index][0] +
+                  " did not specify enough num_knots.  It should be equal or greater than " + (_parms._M[tpIndex] + 1) + ".");
+        }
+        tpIndex++;
+      }
     }
   }
   
@@ -302,7 +306,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
   public void checkOrChooseNumKnots() {
     if (_parms._num_knots == null)
       _parms._num_knots = new int[_parms._gam_columns.length];  // different columns may have different
-    int tpCounter = 0; 
+    int tpCount = 0;
     for (int index = 0; index < _parms._num_knots.length; index++) {  // set zero value _num_knots
       if (_parms._knot_ids == null || (_parms._knot_ids != null && _parms._knot_ids[index] == null)) {  // knots are not specified
         int numKnots = _parms._num_knots[index];
@@ -313,8 +317,10 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         long eligibleRows = _train.numRows()-naSum;
         if (_parms._num_knots[index] == 0) {  // set num_knots to default
           int defaultRows = 10;
-          if (_parms._bs[index] == 1)
-            defaultRows = Math.max(defaultRows, _parms._M[tpCounter]+2);
+          if (_parms._bs[index] == 1) {
+            defaultRows = Math.max(defaultRows, _parms._M[tpCount] + 2);
+            tpCount++;
+          }
           _parms._num_knots[index] = eligibleRows < defaultRows ? (int) eligibleRows : defaultRows;
         } else {  // num_knots assigned by user and check to make sure it is legal
           if (numKnots > eligibleRows) {
@@ -457,7 +463,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         ThinPlateDistanceWithKnots distanceMeasure = 
                 new ThinPlateDistanceWithKnots(_knots, _numPred).doAll(_numKnots, Vec.T_NUM, _predictVec); // Xnmd in 3.1
         double[][] penaltyMat = distanceMeasure.generatePenalty();  // penalty matrix 3.1.1
-        List<Integer[]> polyBasisDegree = findPolybasis(_numPred, calculatem(_numPred)); // polynomial basis lists in 3.2
+        List<Integer[]> polyBasisDegree = findPolyBasis(_numPred, calculatem(_numPred)); // polynomial basis lists in 3.2
         int[][] polyBasisArray = convertList2Array(polyBasisDegree, _M, _numPred);
         copy2DArray(polyBasisArray, _allPolyBasisList[_thinPlateGamColIndex]);
         String colNameStub = genThinPlateNameStart(_parms, _gamColIndex); // gam column names before processing
@@ -653,7 +659,8 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         }
       } catch(Gram.NonSPDMatrixException exception) {
         throw new Gram.NonSPDMatrixException("Consider reducing num knots for your thin plate regression smoothers" +
-                ", enable lambda_search, \nincrease lambda, increase alpha or not use thin plate regression smoothers at all.");
+                ", enable lambda_search, \n or increase L1 penalty/lambda value, or not use thin plate regression " +
+                "smoothers at all.");
       } finally {
         try {
           final List<Key<Vec>> keep = new ArrayList<>();
@@ -747,9 +754,9 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
       if (_parms._keep_gam_cols)
         model._output._gam_transformed_center_key = model._output._gamTransformedTrainCenter.toString();
       if (_parms._savePenaltyMat) {
-        model._output._penaltyMatrices_center = _penalty_mat_center;
+        model._output._penaltyMatricesCenter = _penalty_mat_center;
         model._output._penaltyMatrices = _penalty_mat;
-        model._output._penalty_mat_CS = _penalty_mat_CS;
+        model._output._penaltyMatCS = _penalty_mat_CS;
         model._output._starT = _starT;
       }
       copyGLMCoeffs(glm, model, _parms, nclasses());  // copy over coefficient names and generate coefficients as beta = z*GLM_beta

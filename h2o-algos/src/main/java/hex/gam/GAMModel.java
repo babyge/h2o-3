@@ -402,14 +402,14 @@ public class GAMModel extends Model<GAMModel, GAMModel.GAMParameters, GAMModel.G
     private double[] _zvalues;
     private double _dispersion;
     private boolean _dispersionEstimated;
-    public String[][] _gamColNames; // store gam column names after transformation and decentering
+    public String[][] _gamColNames; // store gam column names after transformation and centering
     public double[][][] _zTranspose; // Z matrix for de-centralization, can be null
-    public double[][][] _penaltyMatrices_center; // stores t(Z)*t(D)*Binv*D*Z and can be null
+    public double[][][] _penaltyMatricesCenter; // stores t(Z)*t(D)*Binv*D*Z and can be null
     public double[][][] _penaltyMatrices;          // store t(D)*Binv*D and can be null
     public double[][][] _binvD; // store BinvD for each gam column specified for scoring
     public double[][][] _knots; // store knots location for each gam column
     int[][][] _allPolyBasisList; // store polynomial basis function for all tp smoothers
-    double[][][] _penalty_mat_CS; // penalty matrix after removing optimization constraint, only for thin plate
+    double[][][] _penaltyMatCS; // penalty matrix after removing optimization constraint, only for thin plate
     double[][][] _zTransposeCS; // store for each thin plate smoother for removing optimization constraint
     public int[] _numKnots;  // store number of knots per gam column
     public double[][][] _starT;

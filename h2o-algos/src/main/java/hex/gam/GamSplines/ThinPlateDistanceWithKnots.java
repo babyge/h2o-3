@@ -23,7 +23,7 @@ public class ThinPlateDistanceWithKnots extends MRTask<ThinPlateDistanceWithKnot
   final int _knotNum; // number of knot values
   final int _d; // number of predictors for smoothers
   final int _m; // highest degree of polynomial basis +1
-  final double _constantTerms;
+  final public double _constantTerms;
   final int _weightID;
   final boolean _dEven;
   
