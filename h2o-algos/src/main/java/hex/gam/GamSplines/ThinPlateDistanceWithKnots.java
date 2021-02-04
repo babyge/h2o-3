@@ -26,14 +26,16 @@ public class ThinPlateDistanceWithKnots extends MRTask<ThinPlateDistanceWithKnot
   final public double _constantTerms;
   final int _weightID;
   final boolean _dEven;
+  final double[] _oneOverGamColStd;
   
-  public ThinPlateDistanceWithKnots(double[][] knots, int d) {
+  public ThinPlateDistanceWithKnots(double[][] knots, int d, double[] oneOGamColStd) {
     _knots = knots;
     _knotNum = _knots[0].length;
     _d = d;
     _dEven = _d%2==0;
     _m = calculatem(_d);
     _weightID = _d; // weight column index
+    _oneOverGamColStd = oneOGamColStd;
     if (_dEven)
       _constantTerms = Math.pow(-1, _m+1+_d/2.0)/(Math.pow(2, _m-1)*Math.pow(Math.PI, _d/2.0)*factorial(_m-_d/2));
     else
@@ -51,7 +53,7 @@ public class ThinPlateDistanceWithKnots extends MRTask<ThinPlateDistanceWithKnot
           fillRowOneValue(newGamCols, _knotNum, Double.NaN);
         } else {  // calculate distance measure as in 3.1
           fillRowData(chkRowValues, chk, rowIndex, _d);
-          calculateDistance(rowValues, chkRowValues, _knotNum, _knots, _d, _dEven, _constantTerms);
+          calculateDistance(rowValues, chkRowValues, _knotNum, _knots, _d, _dEven, _constantTerms, _oneOverGamColStd);
           fillRowArray(newGamCols, _knotNum, rowValues);
         }
       } else {  // insert 0 to newChunk for weigth == 0
@@ -85,14 +87,14 @@ public class ThinPlateDistanceWithKnots extends MRTask<ThinPlateDistanceWithKnot
     return fr;
   }
   
-  public double[][] generatePenalty() {
+  public double[][] generatePenalty(double[][] qmatT) {
     double[][] penaltyMat = new double[_knotNum][_knotNum];
     double[][] knotsTranspose = ArrayUtils.transpose(_knots);
     double[] tempVal = MemoryManager.malloc8d(_knotNum);
     for (int index = 0; index < _knotNum; index++) {
-      calculateDistance(tempVal, knotsTranspose[index], _knotNum, _knots, _d, _dEven, _constantTerms);
+      calculateDistance(tempVal, knotsTranspose[index], _knotNum, _knots, _d, _dEven, _constantTerms, _oneOverGamColStd);
       System.arraycopy(tempVal, 0, penaltyMat[index], 0, _knotNum);
-    }
+    } // penaltyMat is right now hollow with zero off diagonal
     return penaltyMat;
   }
 }

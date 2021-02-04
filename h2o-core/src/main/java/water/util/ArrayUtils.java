@@ -517,12 +517,13 @@ public class ArrayUtils {
     return res;
   }
 
-  public static double[][] chopOffColumns(double[][] ary, int newColNum) {
+  public static double[][] expandArray(double[][] ary, int newColNum) {
     if(ary == null) return null;
-    assert ary[0].length > newColNum : "new array should be smaller than original array in second dimension.";
-    double[][] res = new double[ary.length][newColNum];
-    for(int i = 0; i < res.length; i++) {
-      System.arraycopy(ary[i], 0, res[i], 0, newColNum);
+    assert ary.length < newColNum : "new array should be greater than original array in second dimension.";
+    int oldMatRow = ary.length;
+    double[][] res = new double[newColNum][newColNum];
+    for(int i = 0; i < oldMatRow; i++) {
+      System.arraycopy(ary[i], 0, res[i], 0, oldMatRow);
     }
     return res;
   }
@@ -1101,6 +1102,19 @@ public class ArrayUtils {
     int arraySize = vseed.length;
     for (int i=0; i < arraySize; i++) {
       vseed[i] = random.nextGaussian();
+    }
+    return vseed;
+  }
+
+  /** Remove the array allocation in this one */
+  public static double[] uniformVector(long seed, double[] vseed) {
+    if (vseed == null)
+      return null;
+
+    Random random = getRNG(seed);
+    int arraySize = vseed.length;
+    for (int i=0; i < arraySize; i++) {
+      vseed[i] = random.nextDouble();
     }
     return vseed;
   }

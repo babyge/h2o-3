@@ -13,12 +13,16 @@ public class ThinPlatePolynomialWithKnots extends MRTask<ThinPlatePolynomialWith
   final int[][] _polyBasisList;
   final int _M; // size of polynomial basis
   final int _d; // number of predictors used
+  final double[] _gamColMeanRaw;
+  final double[] _oneOverColStd;
 
-  public ThinPlatePolynomialWithKnots(int weightID, int[][] polyBasis) {
+  public ThinPlatePolynomialWithKnots(int weightID, int[][] polyBasis, double[] gamColMeanRaw, double[] oneOverColStd) {
     _weightID = weightID;
     _d = weightID;
     _polyBasisList = polyBasis;
     _M = polyBasis.length;
+    _gamColMeanRaw = gamColMeanRaw;
+    _oneOverColStd = oneOverColStd;
   }
 
   @Override
@@ -31,7 +35,7 @@ public class ThinPlatePolynomialWithKnots extends MRTask<ThinPlatePolynomialWith
         if (checkRowNA(chk, rowIndex)) {
           fillRowOneValue(newGamCols, _M, Double.NaN);
         } else {
-          extractOneRowFromChunk(chk, rowIndex, oneDataRow, _d); // extract data to oneDataRow
+          extractNDemeanOneRowFromChunk(chk, rowIndex, oneDataRow, _d, _gamColMeanRaw, _oneOverColStd); // extract data to oneDataRow
           calculatePolynomialBasis(onePolyRow, oneDataRow, _d, _M, _polyBasisList);
           fillRowArray(newGamCols, _M, onePolyRow);
         }
@@ -41,8 +45,9 @@ public class ThinPlatePolynomialWithKnots extends MRTask<ThinPlatePolynomialWith
     }
   }
   
-  public static void extractOneRowFromChunk(Chunk[] chk, int rowIndex, double[] oneRow, int d) {
+  public static void extractNDemeanOneRowFromChunk(Chunk[] chk, int rowIndex, double[] oneRow, int d, 
+                                                   double[] gamColMeanRaw, double[] oneOverColStd) {
     for (int colInd = 0; colInd < d; colInd++)
-      oneRow[colInd] = chk[colInd].atd(rowIndex);
+      oneRow[colInd] = (chk[colInd].atd(rowIndex)-gamColMeanRaw[colInd])*oneOverColStd[colInd];
   }
 }

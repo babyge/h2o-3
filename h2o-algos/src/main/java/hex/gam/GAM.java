@@ -34,12 +34,13 @@ import static hex.gam.MatrixFrameUtils.GAMModelUtils.copyGLMtoGAMModel;
 import static hex.gam.MatrixFrameUtils.GamUtils.*;
 import static hex.gam.MatrixFrameUtils.GamUtils.AllocateType.*;
 import static hex.gam.MatrixFrameUtils.GenerateGamMatrixOneColumn.generateZtransp;
+import static hex.util.LinearAlgebraUtils.generateQRTranspose;
 import static hex.genmodel.utils.ArrayUtils.flat;
 import static hex.glm.GLMModel.GLMParameters.Family.multinomial;
 import static hex.glm.GLMModel.GLMParameters.Family.ordinal;
 import static hex.glm.GLMModel.GLMParameters.GLMType.gam;
 import static hex.util.LinearAlgebraUtils.generateOrthogonalComplement;
-import static water.util.ArrayUtils.chopOffColumns;
+import static water.util.ArrayUtils.expandArray;
 import static water.util.ArrayUtils.subtract;
 
 
@@ -49,6 +50,8 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
   private double[] _cv_lambda = null; // bset lambda value found from cross-validation
   private int _thinPlateSmoothersWithKnotsNum = 0;
   private int _cubicSplineNum = 0;
+  double[][] _gamColMeansRaw; // store raw gam column means in gam_column_sorted order and only for thin plate smoothers
+  public double[][] _oneOGamColStd;
   
   @Override
   public ModelCategory[] can_build() {
@@ -420,6 +423,8 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         _zTransposeCS = GamUtils.allocate3DArrayTP(_thinPlateSmoothersWithKnotsNum, _parms, kMinusM, _parms._num_knots_tp);
         _penalty_mat_CS = GamUtils.allocate3DArrayTP(_thinPlateSmoothersWithKnotsNum, _parms, kMinusM, kMinusM);
         _allPolyBasisList = new int[_thinPlateSmoothersWithKnotsNum][][];
+        _gamColMeansRaw = new double[_thinPlateSmoothersWithKnotsNum][];
+        _oneOGamColStd = new double[_thinPlateSmoothersWithKnotsNum][];
         if (_parms._savePenaltyMat)
           _starT = GamUtils.allocate3DArrayTP(_thinPlateSmoothersWithKnotsNum, _parms, _parms._num_knots_tp, _parms._M);
       }
@@ -460,9 +465,16 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
 
       @Override
       protected void compute() {
+        double[] rawColMeans = new double[_numPred];        
+        double[] oneOverColStd = new double[_numPred];
+        for (int colInd = 0; colInd < _numPred; colInd++) {
+          rawColMeans[colInd] = _predictVec.vec(colInd).mean();
+          oneOverColStd[colInd] = 1.0/_predictVec.vec(colInd).sigma();  // std
+        }
+        System.arraycopy(rawColMeans, 0, _gamColMeansRaw[_thinPlateGamColIndex], 0, rawColMeans.length);
+        System.arraycopy(oneOverColStd, 0, _oneOGamColStd[_thinPlateGamColIndex], 0, oneOverColStd.length);
         ThinPlateDistanceWithKnots distanceMeasure = 
-                new ThinPlateDistanceWithKnots(_knots, _numPred).doAll(_numKnots, Vec.T_NUM, _predictVec); // Xnmd in 3.1
-        double[][] penaltyMat = distanceMeasure.generatePenalty();  // penalty matrix 3.1.1
+                new ThinPlateDistanceWithKnots(_knots, _numPred, oneOverColStd).doAll(_numKnots, Vec.T_NUM, _predictVec); // Xnmd in 3.1
         List<Integer[]> polyBasisDegree = findPolyBasis(_numPred, calculatem(_numPred)); // polynomial basis lists in 3.2
         int[][] polyBasisArray = convertList2Array(polyBasisDegree, _M, _numPred);
         copy2DArray(polyBasisArray, _allPolyBasisList[_thinPlateGamColIndex]);
@@ -474,29 +486,33 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         Frame thinPlateFrame = distanceMeasure.outputFrame(Key.make(), distanceColNames, null);
         for (int index = 0; index < _numKnots; index++)
           _gamColMeans[_gamColIndex][index] = thinPlateFrame.vec(index).mean();
-        double[][] starT = generateStarT(_knots, polyBasisDegree); // generate T* in 3.2.3
-        double[][] zCST = generateOrthogonalComplement(starT, _numKnotsMM, _parms._seed);
+        double[][] starT = generateStarT(_knots, polyBasisDegree, rawColMeans, oneOverColStd); // generate T* in 3.2.3
+        double[][] qmatT = generateQRTranspose(starT);
+        double[][] penaltyMat = distanceMeasure.generatePenalty(qmatT);  // penalty matrix 3.1.1
+        double[][] zCST = generateOrthogonalComplement(qmatT, starT, _numKnotsMM, _parms._seed);
         copy2DArray(zCST, _zTransposeCS[_thinPlateGamColIndex]);
-        double[][] penaltyMatCS = ArrayUtils.multArrArr(ArrayUtils.multArrArr(zCST, penaltyMat), 
-                ArrayUtils.transpose(zCST));  // transform penalty matrix to transpose(Zcs)*Xnmd*Zcs, 3.3
+        ThinPlatePolynomialWithKnots thinPlatePoly = new ThinPlatePolynomialWithKnots(_numPred,
+                polyBasisArray, rawColMeans, oneOverColStd).doAll(_M, Vec.T_NUM, _predictVec); // generate polynomial basis T as in 3.2
+        Frame thinPlatePolyBasis = thinPlatePoly.outputFrame(null, polyNames, null);
+        for (int index = 0; index < _M; index++)
+          _gamColMeans[_gamColIndex][index+_numKnots] = thinPlatePolyBasis.vec(index).mean();
         thinPlateFrame = ThinPlateDistanceWithKnots.applyTransform(thinPlateFrame, colNameStub
-                        +"TPKnots_", _parms, zCST, _numKnotsMM);        // generate Xcs as in 3.3
+                +"TPKnots_", _parms, zCST, _numKnotsMM);        // generate Xcs as in 3.3
+        thinPlateFrame.add(thinPlatePolyBasis.names(), thinPlatePolyBasis.removeAll());        // concatenate Xcs and T
+        double[][] ztranspose =  generateZtransp(thinPlateFrame, _numKnots);     // generate Z for centering as in 3.4
+        copy2DArray(ztranspose, _zTranspose[_gamColIndex]);
+        double[][] penaltyMatCS = ArrayUtils.multArrArr(ArrayUtils.multArrArr(zCST, penaltyMat),
+                ArrayUtils.transpose(zCST));  // transform penalty matrix to transpose(Zcs)*Xnmd*Zcs, 3.3
+        ScaleTPPenalty scaleTPPenaltyCS = new ScaleTPPenalty(penaltyMatCS, thinPlateFrame).doAll(thinPlateFrame);
+        penaltyMatCS = scaleTPPenaltyCS._penaltyMat;
+        double[][] expandPenaltyCS = expandArray(penaltyMatCS, _numKnots);   // used for penalty matrix
         if (_savePenaltyMat) {  // save intermediate steps for debugging
           copy2DArray(penaltyMat, _penalty_mat[_gamColIndex]);
           copy2DArray(starT, _starT[_thinPlateGamColIndex]);
           copy2DArray(penaltyMatCS, _penalty_mat_CS[_thinPlateGamColIndex]);
         }
-        ThinPlatePolynomialWithKnots thinPlatePoly = new ThinPlatePolynomialWithKnots(_numPred,
-                polyBasisArray).doAll(_M, Vec.T_NUM, _predictVec);        // generate polynomial basis T as in 3.2
-        Frame thinPlatePolyBasis = thinPlatePoly.outputFrame(null, polyNames, null);
-        for (int index = 0; index < _M; index++)
-          _gamColMeans[_gamColIndex][index+_numKnots] = thinPlatePolyBasis.vec(index).mean();
-        thinPlateFrame.add(thinPlatePolyBasis.names(), thinPlatePolyBasis.removeAll());         // concatenate Xcs and T
-        double[][] ztranspose =  generateZtransp(thinPlateFrame, _numKnots);     // generate Z for centering as in 3.4
-        double[][] ztransposeChopped = chopOffColumns(ztranspose, _numKnotsMM);   // used for penalty matrix
-        copy2DArray(ztranspose, _zTranspose[_gamColIndex]);
-        double[][] penaltyCenter = ArrayUtils.multArrArr(ArrayUtils.multArrArr(ztransposeChopped, penaltyMatCS),
-                ArrayUtils.transpose(ztransposeChopped));
+        double[][] penaltyCenter = ArrayUtils.multArrArr(ArrayUtils.multArrArr(ztranspose, expandPenaltyCS),
+                ArrayUtils.transpose(ztranspose));
         copy2DArray(penaltyCenter, _penalty_mat_center[_gamColIndex]);
         thinPlateFrame = ThinPlateDistanceWithKnots.applyTransform(thinPlateFrame, colNameStub+"center_", 
                 _parms, ztranspose, _numKnotsM1);          // generate Xz as in 3.4
@@ -579,6 +595,8 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
           _gamColNamesCenter[index] = new String[numKnotsM1];
           _gamColMeans[index] = new double[kPlusM];
           _allPolyBasisList[thinPlateInd] = new int[_parms._M[thinPlateInd]][_parms._gamPredSize[index]];
+          _gamColMeansRaw[thinPlateInd] = new double[_parms._gamPredSize[index]];
+          _oneOGamColStd[thinPlateInd] = new double[_parms._gamPredSize[index]];
           generateGamColumn[index] = new ThinPlateRegressionSmootherWithKnots(predictVec, _parms, index, _knots[index], 
                   thinPlateInd++);
         }
@@ -611,7 +629,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
       
       if (valid() != null) {  // transform the validation frame if present
         _valid = rebalance(cleanUpInputFrame(_parms.valid().clone(), _parms, _gamColNamesCenter, _binvD, _zTranspose, 
-                _knots, _zTransposeCS, _allPolyBasisList), false, _result+".temporary.valid");
+                _knots, _zTransposeCS, _allPolyBasisList, _gamColMeansRaw, _oneOGamColStd), false, _result+".temporary.valid");
       }
       DKV.put(newTFrame); // This one will cause deleted vectors if add to Scope.track
       Frame newValidFrame = _valid == null ? null : new Frame(_valid);
@@ -659,7 +677,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
         }
       } catch(Gram.NonSPDMatrixException exception) {
         throw new Gram.NonSPDMatrixException("Consider reducing num knots for your thin plate regression smoothers" +
-                ", enable lambda_search, \n or increase L1 penalty/lambda value, or not use thin plate regression " +
+                ", enable lambda_search, \n or decrease scale parameter or not use thin plate regression " +
                 "smoothers at all.");
       } finally {
         try {
@@ -743,6 +761,7 @@ public class GAM extends ModelBuilder<GAMModel, GAMModel.GAMParameters, GAMModel
       model._output._numKnots = _numKnots;
       model._cubicSplineNum = _cubicSplineNum;
       model._thinPlateSmoothersWithKnotsNum = _thinPlateSmoothersWithKnotsNum;
+      model._output._gamColMeansRaw = _gamColMeansRaw;
       // extract and store best_alpha/lambda/devianceTrain/devianceValid from best submodel of GLM model
       model._output._best_alpha = glm._output.getSubmodel(glm._output._selected_submodel_idx).alpha_value;
       model._output._best_lambda = glm._output.getSubmodel(glm._output._selected_submodel_idx).lambda_value;

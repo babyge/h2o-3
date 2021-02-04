@@ -93,7 +93,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
 
   // test with Gaussian with only thin plate regression smoothers with two predictors.  
   @Test
-  public void testTP2DNTransform() {
+  public void testTP2D() {
     Scope.enter();
     try {
       Frame train = Scope.track(parse_test_file("smalldata/glm_test/gaussian_20cols_10000Rows.csv"));
@@ -101,17 +101,17 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
               "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
       String[][] gamCols = new String[][]{{"C11", "C12"}, {"C13", "C14"}};
       GAMParameters params = new GAMParameters();
-      int k = 10;
+      int k = 6;
       params._response_column = "C21";
       params._ignored_columns = ignoredCols;
       params._num_knots = new int[]{k, k};
       params._gam_columns = gamCols;
       params._bs = new int[]{1, 1};
-      params._scale = new double[]{10, 10};
+      params._scale = new double[]{0.01, 0.01};
       params._train = train._key;
       params._savePenaltyMat = true;
-    //  params._lambda = new double[]{10};
-      params._lambda_search = true;
+      params._lambda = new double[]{0.01};
+      //params._lambda_search = true;
       GAMModel gam = new GAM(params).trainModel().get();
       Scope.track_generic(gam);
       // check starT is of size k x M
@@ -186,6 +186,33 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
       temp *= Math.pow(knots[predInd][rowIndex], onePolyBasis[predInd]);
     }
     return temp;
+  }
+
+  // test with various data transform (standardize, demean) with CS and TP smoothers
+  @Test
+  public void testDataTransform() {
+    Scope.enter();
+    try {
+      Frame train = Scope.track(parse_test_file("smalldata/glm_test/gaussian_20cols_10000Rows.csv"));
+      String[] ignoredCols = new String[]{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12",
+              "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
+      String[][] gamCols = new String[][]{{"C11", "C12"}, {"C13", "C14", "C15"}, {"C16"}, {"C17"}};
+      GAMParameters params = new GAMParameters();
+      params._response_column = "C21";
+      params._ignored_columns = ignoredCols;
+      params._num_knots = new int[]{5, 11, 4, 10};
+      params._gam_columns = gamCols;
+      params._bs = new int[]{1, 1, 1, 0};
+      params._scale = new double[]{10, 10, 10, 10};
+      params._train = train._key;
+      params._savePenaltyMat = true;
+      params._lambda_search = true;
+      //params._standardize = true;
+      GAMModel gamStandardize = new GAM(params).trainModel().get();
+      Scope.track_generic(gamStandardize);
+    } finally {
+      Scope.exit();
+    }
   }
   
   // test to make sure default knots are generated correctly.
@@ -378,7 +405,7 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     int rowNum2Check = (int) Math.floor(data.numRows()*frac2Test);
     int rowInd = Math.round(data.numRows()/rowNum2Check);
     double[][] knots = output._knots[gamIndex];
-    ThinPlateDistanceWithKnots tpDistance = new ThinPlateDistanceWithKnots(knots, d);
+    ThinPlateDistanceWithKnots tpDistance = new ThinPlateDistanceWithKnots(knots, d, output._oneOGamColStd[gamIndex]);
     int[][] allPolyBasis = convertList2Array(findPolyBasis(d, m), M, d);
     double[] dataInput = new double[d]; // store predictor data before gamification
     double[] dataDistance = new double[numKnot];  // store data after generating distance
@@ -390,7 +417,8 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     
     for (int rowIndex = 0; rowIndex < data.numRows(); rowIndex = rowIndex+rowInd) {
       grabOneRow(data, dataInput, parms._gam_columns_sorted[gamIndex], rowIndex);
-      calculateDistance(dataDistance, dataInput, numKnot, knots, d, (d % 2==0), tpDistance._constantTerms);
+      calculateDistance(dataDistance, dataInput, numKnot, knots, d, (d % 2==0), tpDistance._constantTerms, 
+              output._oneOGamColStd[rowIndex]);
       double[] dataDistanceCS = multVecArr(dataDistance, zCS);
       generatePolyOneRow(dataInput, allPolyBasis, dataPoly);
       System.arraycopy(dataDistanceCS, 0, dataDistPlusPoly, 0, numKnotsMinusM);
@@ -456,9 +484,9 @@ public class GamThinPlateRegressionBasicTest extends TestUtil {
     // check the application of zCS to penalty matrix is correct;
     double[][] penaltyMatCSManual = multArrArr(multArrArr(zCST, penaltyMat), zCS);
     checkDoubleArrays(penaltyMatCS, penaltyMatCSManual, MAGEPS);    
-    double[][] zTChopped = chopOffColumns(zT, penaltyMatCSManual.length);
-    double[][] zChopped = transpose(zTChopped);
-    double[][] penaltyMatCenterManual = multArrArr(multArrArr(zTChopped, penaltyMatCSManual), zChopped);
+    double[][] penaltyMatCSManualExpand = expandArray(penaltyMatCSManual, zT[0].length);
+    double[][] z = transpose(zT);
+    double[][] penaltyMatCenterManual = multArrArr(multArrArr(zT, penaltyMatCSManualExpand), z);
     // check the application of zCS to penalty matrix CS is correct;
     checkDoubleArrays(penaltyMatCenter, penaltyMatCenterManual, MAGEPS);
   }

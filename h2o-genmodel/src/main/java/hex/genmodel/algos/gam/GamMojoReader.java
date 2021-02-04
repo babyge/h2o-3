@@ -76,6 +76,10 @@ public class GamMojoReader extends ModelMojoReader<GamMojoModelBase> {
       _model._d = readkv("_d");
       _model._m = readkv("_m");
       _model._M = readkv("_M");
+      int[] predSize = new int[_model._num_TP_col];
+      System.arraycopy(predSize, predSize.length-_model._num_TP_col, predSize, 0, _model._num_TP_col);
+      _model._gamColMeansRaw = read2DDoubleArrays(predSize, "gamColMeansRaw");
+      _model._oneOGamColStd = read2DDoubleArrays(predSize, "gamColStdRaw");
       int[] numKnotsMM = subtract(_model._num_knots_TP, _model._M);
       _model._zTransposeCS = read3DArray("zTransposeCS", _model._num_TP_col, numKnotsMM, _model._num_knots_TP);
       _model._allPolyBasisList = read3DIntArray("polynomialBasisList", _model._num_TP_col, _model._M, _model._d);
@@ -112,6 +116,19 @@ public class GamMojoReader extends ModelMojoReader<GamMojoModelBase> {
       }
     }
     return stringArrays;
+  }
+
+  double[][] read2DDoubleArrays(int[] arrayDim, String title) throws IOException {
+    int firstDim = arrayDim.length;
+    double[][] doubleArrays = new double[firstDim][];
+    ByteBuffer bb = ByteBuffer.wrap(readblob(title));
+    for (int index = 0; index < firstDim; index++) {
+      doubleArrays[index] = new double[arrayDim[index]];
+      for (int index2nd = 0; index2nd < arrayDim[index]; index2nd++) {
+        doubleArrays[index][index2nd] = bb.getDouble();
+      }
+    }
+    return doubleArrays;
   }
   
   double[][] read2DArray(String title, int firstDSize, int secondDSize) throws IOException {

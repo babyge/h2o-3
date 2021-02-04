@@ -144,17 +144,13 @@ public class LinearAlgebraUtils {
    * @param numBasis: integer denoting number of basis in the orthogonal complement
    * @return
    */
-  public static double[][] generateOrthogonalComplement(final double[][] starT, final int numBasis, long seed) {
-    Matrix starTMat = new Matrix(starT);        // generate Zcs as in 3.3
-    QRDecomposition starTMat_qr = new QRDecomposition(starTMat);
-    double[][] qMat = starTMat_qr.getQ().getArray();
-    final int numOrthVec = qMat[0].length;  // number of vectors in original orthogonal basis
-    final int vecSize = qMat.length;  // size of vector
-    final double[][] orthMatT = ArrayUtils.transpose(qMat);  // transpose of orthogonal basis
+  public static double[][] generateOrthogonalComplement(final double[][] orthMatT, final double[][] starT, final int numBasis, long seed) {
+    final int numOrthVec = orthMatT.length;  // number of vectors in original orthogonal basis
+    final int vecSize = orthMatT[0].length;  // size of vector
     double[][] orthMatCompT = new double[numBasis][vecSize];  // store transpose of orthogonal complement
     double[] innerProd = new double[numOrthVec];
     double[] scaleProd = new double[vecSize];
-    // take the different between random vector and qMat
+    // take the difference between random vectors and qMat
     for (int index = 0; index < numBasis; index++) {
       orthMatCompT[index] = ArrayUtils.gaussianVector(seed + index, orthMatCompT[index]);
       genInnerProduct(orthMatT, orthMatCompT[index], innerProd);
@@ -167,6 +163,13 @@ public class LinearAlgebraUtils {
     // go through random vectors with orthogonal vector basis subtracted from it, make them orthogonal to each other
     applyGramSchmit(orthMatCompT);
     return orthMatCompT;
+  }
+  
+  public static double[][] generateQRTranspose(final double[][] starT) {
+    Matrix starTMat = new Matrix(starT);        // generate Zcs as in 3.3
+    QRDecomposition starTMat_qr = new QRDecomposition(starTMat);
+    double[][] qMat = starTMat_qr.getQ().getArray();
+    return ArrayUtils.transpose(qMat);  // transpose of orthogonal basis
   }
   
   public static void genInnerProduct(double[][] mat, double[] vector, double[] innerProd) {
@@ -183,13 +186,13 @@ public class LinearAlgebraUtils {
     double[] scaleVec = new double[vecSize];
     for (int index = 0; index < numVec; index++) {
       genInnerProduct(matT, matT[index], innerProd);
-      for (int indexJ = 0; indexJ < index; indexJ++) {
+      for (int indexJ = 0; indexJ < index; indexJ++) {  // take the difference between random vectors
         System.arraycopy(matT[indexJ], 0, scaleVec, 0, vecSize);
         mult(scaleVec, innerProd[indexJ]);
         subtract(matT[index], scaleVec, matT[index]);
       }
       double mag = 1.0/l2norm(matT[index]);
-      ArrayUtils.mult(matT[index], mag);
+      ArrayUtils.mult(matT[index], mag);  // make vector to have unit magnitude
     }
   }
 

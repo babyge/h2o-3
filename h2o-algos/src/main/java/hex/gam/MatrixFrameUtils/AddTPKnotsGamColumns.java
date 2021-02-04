@@ -65,13 +65,14 @@ public class AddTPKnotsGamColumns {
     _adapted = fr;
   }
 
-  public void addTPGamCols() {
+  public void addTPGamCols(double[][] gamColMeansRaw, double[][] oneOColStd) {
     RecursiveAction[] generateGamColumn = new RecursiveAction[_numTPCols];
     for (int index = 0; index < _numTPCols; index++) { // generate smoothers/splines
       final int offsetIndex = index + _numCSCols;
       final Frame predictVec = prepareGamVec(offsetIndex, _parms, _adapted);  // extract predictors from training frame
       generateGamColumn[index] = new ApplyTPRegressionSmootherWithKnots(predictVec, _parms, offsetIndex, 
-              _knots[offsetIndex], index, _zCS[index], _z[offsetIndex], _polyBasisList[index]);
+              _knots[offsetIndex], index, _zCS[index], _z[offsetIndex], _polyBasisList[index], gamColMeansRaw[index], 
+              oneOColStd[index]);
     }
     ForkJoinTask.invokeAll(generateGamColumn);
   }
@@ -90,9 +91,12 @@ public class AddTPKnotsGamColumns {
     final double[][] _zCST;
     final double[][] _zT;
     final int[][] _polyBasisList;
+    final double[] _gamColMeanRaw;
+    final double[] _oneOColStd;
 
     public ApplyTPRegressionSmootherWithKnots(Frame predV, GAMParameters parms, int gamColIndex, double[][] knots,
-                                              int thinPlateInd, double[][] zCST, double[][] zT, int[][] polyBasis) {
+                                              int thinPlateInd, double[][] zCST, double[][] zT, int[][] polyBasis, 
+                                              double[] gamColMeanRaw, double[] oneOColStd) {
       _predictVec  = predV;
       _knots = knots;
       _numKnots = knots[0].length;
@@ -106,12 +110,14 @@ public class AddTPKnotsGamColumns {
       _zCST = zCST;
       _zT = zT;
       _polyBasisList = polyBasis;
+      _gamColMeanRaw = gamColMeanRaw;
+      _oneOColStd = oneOColStd;
     }
 
     @Override
     protected void compute() {
       ThinPlateDistanceWithKnots distanceMeasure =
-              new ThinPlateDistanceWithKnots(_knots, _numPred).doAll(_numKnots, Vec.T_NUM, _predictVec); // Xnmd in 3.1
+              new ThinPlateDistanceWithKnots(_knots, _numPred, _oneOColStd).doAll(_numKnots, Vec.T_NUM, _predictVec); // Xnmd in 3.1
       String colNameStub = genThinPlateNameStart(_parms, _gamColIndex); // gam column names before processing
       String[] gamColNames = generateGamColNamesThinPlateKnots(_gamColIndex, _parms, _polyBasisList, colNameStub);
       String[] distanceColNames = extractColNames(gamColNames, 0, 0, _numKnots);
@@ -120,7 +126,8 @@ public class AddTPKnotsGamColumns {
 
       thinPlateFrame = ThinPlateDistanceWithKnots.applyTransform(thinPlateFrame, colNameStub
               +"CS_", _parms, _zCST, _numKnotsMM);        // generate Xcs as in 3.3
-      ThinPlatePolynomialWithKnots thinPlatePoly = new ThinPlatePolynomialWithKnots(_numPred, _polyBasisList).doAll(_M,
+      ThinPlatePolynomialWithKnots thinPlatePoly = new ThinPlatePolynomialWithKnots(_numPred, _polyBasisList,
+              _gamColMeanRaw, _oneOColStd).doAll(_M,
               Vec.T_NUM, _predictVec);        // generate polynomial basis T as in 3.2
       Frame thinPlatePolyBasis = thinPlatePoly.outputFrame(null, polyNames, null);
       thinPlateFrame.add(thinPlatePolyBasis.names(), thinPlatePolyBasis.removeAll());         // concatenate Xcs and T

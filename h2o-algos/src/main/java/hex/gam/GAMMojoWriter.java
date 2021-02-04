@@ -70,9 +70,9 @@ public class GAMMojoWriter extends ModelMojoWriter<GAMModel, GAMModel.GAMParamet
     write2DStringArrays(model._gamColNames, "gamColNamesCenter"); // numGamCol by numKnots for CS, by numKnots+M for TP
     write2DStringArrays(model._gamColNamesNoCentering,"gamColNames"); // numGamCol by numKnots-1
     if (model._parms._family==multinomial || model._parms._family==ordinal) {
-      writeDoubleArray(model._output._model_beta_multinomial_no_centering, "beta_multinomial");
+      write2DArray(model._output._model_beta_multinomial_no_centering, "beta_multinomial");
       writekv("beta length per class", model._output._model_beta_multinomial_no_centering[0].length);
-      writeDoubleArray(model._output._model_beta_multinomial, "beta_multinomial_centering");
+      write2DArray(model._output._model_beta_multinomial, "beta_multinomial_centering");
       writekv("beta center length per class", model._output._model_beta_multinomial[0].length);
     } else {
       writekv("beta", model._output._model_beta_no_centering); // beta without centering
@@ -86,8 +86,10 @@ public class GAMMojoWriter extends ModelMojoWriter<GAMModel, GAMModel.GAMParamet
     write3DArray(model._output._zTranspose, "zTranspose");
     writekv("_d", model._parms._gamPredSize);
     if (model._output._zTransposeCS != null) {  // write array only if it is not null
-      writeTripleIntArray(model._output._allPolyBasisList, "polynomialBasisList");
+      write3DIntArray(model._output._allPolyBasisList, "polynomialBasisList");
       write3DArray(model._output._zTransposeCS, "zTransposeCS");
+      write2DArray(model._output._gamColMeansRaw, "gamColMeansRaw");
+      write2DArray(model._output._oneOGamColStd, "gamColStdRaw");
       writekv("_M", model._parms._M);
       writekv("_m", model._parms._m);
       writekv("num_knots_TP", model._parms._num_knots_tp); // an array

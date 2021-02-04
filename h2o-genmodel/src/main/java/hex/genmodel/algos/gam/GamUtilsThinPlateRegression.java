@@ -21,11 +21,12 @@ public class GamUtilsThinPlateRegression {
   }
 
   public static void calculateDistance(double[] rowValues, double[] chk, int knotNum, double[][] knots, int d,
-                                       boolean dEven, double constantTerms) { // see 3.1
+                                       boolean dEven, double constantTerms, double[] oneOGamColStd) { // see 3.1
     for (int knotInd = 0; knotInd < knotNum; knotInd++) { // calculate distance between data and knots
       double sumSq = 0;
       for (int predInd = 0; predInd < d; predInd++) {
-        double temp = chk[predInd] - knots[predInd][knotInd];
+        //double temp = (chk[predInd] - knots[predInd][knotInd])*oneOGamColStd[predInd];
+        double temp = (chk[predInd] - knots[predInd][knotInd]);
         sumSq += temp*temp;
       }
       double distance = Math.sqrt(sumSq);

@@ -1,17 +1,16 @@
 package hex.gam.GamSplines;
 
-import Jama.Matrix;
-import Jama.QRDecomposition;
+import water.MRTask;
 import water.fvec.Chunk;
 import water.fvec.Frame;
 import water.fvec.NewChunk;
+import water.util.ArrayUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static hex.gam.GAMModel.GAMParameters;
-import static hex.util.LinearAlgebraUtils.generateOrthogonalComplement;
 import static water.util.ArrayUtils.maxValue;
 
 // This class contains functions that perform different functions for generating the thin plate regression splines
@@ -194,33 +193,31 @@ public class ThinPlateRegressionUtils {
       currCombo[tempIndex] = 0;
   }
   
-  public static double[][] generateStarT(double[][] knots, List<Integer[]> polyBasisDegree) {
+  public static double[][] generateStarT(double[][] knots, List<Integer[]> polyBasisDegree, double[] gamColMeanRaw, 
+                                         double[] oneOColStd) {
     int numKnots = knots[0].length;
     int M = polyBasisDegree.size();
     int d = knots.length;
+    double[][] knotsDemean = new double[d][numKnots];
+    for (int predInd = 0; predInd < d; predInd++)
+      for (int index = 0; index < M; index++) {
+        knotsDemean[predInd][index] = (knots[predInd][index]-gamColMeanRaw[predInd])*oneOColStd[predInd];
+      }
+    
     double[][] starT = new double[numKnots][M];
     for (int rowInd = 0; rowInd < numKnots; rowInd++) {
       for (int polyBasisInd = 0; polyBasisInd < M; polyBasisInd++) {
         Integer[] oneBasis = polyBasisDegree.get(polyBasisInd);
         double polyBasisVal = 1.0;
         for (int predInd = 0; predInd < d; predInd++) {
-          polyBasisVal *= Math.pow(knots[predInd][rowInd], oneBasis[predInd]);
+          polyBasisVal *= Math.pow(knotsDemean[predInd][rowInd], oneBasis[predInd]);
         }
         starT[rowInd][polyBasisInd] = polyBasisVal;
       }
     }
     return starT;
   }
-
-  public static double[][]extractLastKMinuMCols(double[][] qMat, int rowStart, int rowEnd) {
-    int nCol = rowEnd - rowStart;
-    int nRow = rowEnd;
-    double[][] zCS = new double[nRow][nCol];
-    for (int index = 0; index < rowEnd; index++) {
-      System.arraycopy(qMat[index], rowStart, zCS[index], 0, nCol);
-    }
-    return zCS;
-  }
+  
   public static void fillRowOneValue(NewChunk[] newChk, int colWidth, double fillValue) {
     for (int colInd = 0; colInd < colWidth; colInd++)
       newChk[colInd].addNum(fillValue);
@@ -266,14 +263,6 @@ public class ThinPlateRegressionUtils {
     return distanceColNames;
   }
   
-  public static double[][] genZCS(GAMParameters parms, int numVec, int vecSize, double[][] starT) {
-    Matrix starTMat = new Matrix(starT);        // generate Zcs as in 3.3
-    QRDecomposition starTMat_qr = new QRDecomposition(starTMat);
-    double[][] qMat = starTMat_qr.getQ().getArray();
-    double[][] zCS = generateOrthogonalComplement(qMat, numVec, parms._seed);
-    return zCS;
-  }
-  
   public static int[][] convertList2Array(List<Integer[]> list2Convert, int M, int d) {
     int[][] polyBasisArr = new int[M][d];
     for (int index = 0; index < M; index++) {
@@ -281,13 +270,6 @@ public class ThinPlateRegressionUtils {
       polyBasisArr[index] = oneList.stream().mapToInt(Integer::intValue).toArray();
     }
     return polyBasisArr;
-  }
-
-  public static double[][] allocate2DArr(int firstDim, int[] secondDim) {
-    double[][] arrs = new double[firstDim][];
-    for (int index=0; index < firstDim; index++)
-      arrs[index] = new double[secondDim[index]];
-    return arrs;
   }
   
   public static double[][] genKnotsMultiplePreds(Frame predictVec, GAMParameters parms, int predIndex) {
@@ -314,5 +296,46 @@ public class ThinPlateRegressionUtils {
     }
     parms._num_knots[predIndex] = knots[0].length;
     return knots;
+  }
+  
+  public static class ScaleTPPenalty extends MRTask<ScaleTPPenalty> {
+    public double[][] _penaltyMat;
+    double[] _maxAbsRowSum; // store maximum row sum per chunk
+    public int _initChunks; // number of chunks
+    double _s_scale;
+
+    public ScaleTPPenalty(double[][] origPenaltyMat, Frame distancePlusPoly) {
+      _penaltyMat = origPenaltyMat;
+      _initChunks = distancePlusPoly.vec(0).nChunks();
+    }
+
+    @Override
+    public void map(Chunk[] chk, NewChunk[] newGamCols) {
+      _maxAbsRowSum = new double[_initChunks];
+      int cIndex = chk[0].cidx();
+      _maxAbsRowSum[cIndex] = Double.NEGATIVE_INFINITY;
+      int numRow = chk[0]._len;
+      for (int rowIndex = 0; rowIndex < numRow; rowIndex++) {
+        double rowSum = 0.0;
+        for (int colIndex = 0; colIndex < chk.length; colIndex++) {
+          rowSum += Math.abs(chk[colIndex].atd(rowIndex));
+        }
+        if (rowSum > _maxAbsRowSum[cIndex])
+          _maxAbsRowSum[cIndex] = rowSum;
+      }
+    }
+
+    @Override
+    public void reduce(ScaleTPPenalty other) {
+      ArrayUtils.add(_maxAbsRowSum, other._maxAbsRowSum);
+    }
+    
+    @Override
+    public void postGlobal() {  // scale the _penalty function according to R
+      double tempMaxValue = ArrayUtils.maxValue(_maxAbsRowSum);
+      _s_scale = tempMaxValue*tempMaxValue/ArrayUtils.rNorm(_penaltyMat, 'i');  // symmetric matrix
+      ArrayUtils.mult(_penaltyMat, _s_scale);
+      _s_scale = 1/ _s_scale;
+    }
   }
 }

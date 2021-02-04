@@ -413,6 +413,8 @@ public class GAMModel extends Model<GAMModel, GAMModel.GAMParameters, GAMModel.G
     double[][][] _zTransposeCS; // store for each thin plate smoother for removing optimization constraint
     public int[] _numKnots;  // store number of knots per gam column
     public double[][][] _starT;
+    public double[][] _gamColMeansRaw;
+    public double[][] _oneOGamColStd;
     public Key<Frame> _gamTransformedTrainCenter;  // contain key of predictors, all gam columns centered
     public DataInfo _dinfo;
     public String[] _responseDomains;
@@ -497,18 +499,19 @@ public class GAMModel extends Model<GAMModel, GAMModel.GAMParameters, GAMModel.G
   public Frame cleanUpInputFrame(Frame test) {
     Frame adptedF = new Frame(Key.make(), test.names(), test.vecs().clone()); // clone test dataset
     return cleanUpInputFrame(adptedF, _parms, _gamColNames, _output._binvD, _output._zTranspose, 
-            _output._knots, _output._zTransposeCS, _output._allPolyBasisList);// fix me
+            _output._knots, _output._zTransposeCS, _output._allPolyBasisList, _output._gamColMeansRaw, _output._oneOGamColStd);// fix me
   }
 
   public static Frame cleanUpInputFrame(Frame adptedF, GAMParameters parms, String[][] gamColNames, double[][][] binvD,
                                         double[][][] zTranspose, double[][][] knots,
-                                        double[][][] zTransposeCS, int[][][] polyBasisList) {
+                                        double[][][] zTransposeCS, int[][][] polyBasisList, double[][] gamColMeansRaw, 
+                                        double[][] oneOGamColStd) {
     String[] testNames = adptedF.names();
     // add gam columns with single predictor smoothers
     Frame csAugmentedColumns = addCSGamColumns(adptedF, parms, gamColNames, binvD, zTranspose, knots);
     // add gam columns with multiple predictor smoothers
     Frame tpAugmentedColumns = addTPGamColumns(adptedF, parms, zTransposeCS, zTranspose, polyBasisList, 
-            knots);
+            knots, gamColMeansRaw, oneOGamColStd);
     
     if (csAugmentedColumns == null)
       csAugmentedColumns = tpAugmentedColumns;
@@ -540,13 +543,14 @@ public class GAMModel extends Model<GAMModel, GAMModel.GAMParameters, GAMModel.G
   }
   
   public static Frame addTPGamColumns(Frame adaptedF, GAMParameters parms, double[][][] zTransposeCS, 
-                                      double[][][] zTranspose, int[][][] polyBasisList, double[][][] knots) {
+                                      double[][][] zTranspose, int[][][] polyBasisList, double[][][] knots,
+                                      double[][] gamColMeansRaw, double[][] oneOColStd) {
     int numTPCols = parms._M==null?0:parms._M.length;
     if (numTPCols == 0)
       return null;
     AddTPKnotsGamColumns addTPCols = new AddTPKnotsGamColumns(parms, zTransposeCS, zTranspose, polyBasisList, knots,
             adaptedF);
-    addTPCols.addTPGamCols(); // generate thin plate regression smoothers
+    addTPCols.addTPGamCols(gamColMeansRaw, oneOColStd); // generate thin plate regression smoothers
     return concateGamVecs(parms, addTPCols._gamFrameKeysCenter);
   }
   

@@ -125,7 +125,7 @@ public abstract class ModelMojoWriter<M extends Model<M, P, O>, P extends Model.
     finishWritingTextFile();
   }
 
-  public void writeDoubleArray(double[][] array, String title) throws IOException {
+  public void write2DArray(double[][] array, String title) throws IOException {
     int totArraySize = 0;
     for (double[] row : array)
       totArraySize += row.length;
@@ -137,7 +137,7 @@ public abstract class ModelMojoWriter<M extends Model<M, P, O>, P extends Model.
     writeblob(title, bb.array());
   }
 
-  public void writeTripleIntArray(int[][][] array, String title) throws IOException {
+  public void write3DIntArray(int[][][] array, String title) throws IOException {
     int totArraySize = 0;
     int outDim = array.length;
     for (int index = 0; index < outDim; index++) {

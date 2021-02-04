@@ -74,6 +74,8 @@ public abstract class GamMojoModelBase extends MojoModel implements ConverterFac
   double[][] _tpDistzCSPolyzT; // centered distance measure *zCS + polynomial
   boolean[] _dEven;
   double[] _constantTerms;
+  double[][] _gamColMeansRaw;
+  double[][] _oneOGamColStd;
   
   GamMojoModelBase(String[] columns, String[][] domains, String responseColumn) {
     super(columns, domains, responseColumn);
@@ -199,13 +201,14 @@ public abstract class GamMojoModelBase extends MojoModel implements ConverterFac
       } else if (_bs_sorted[cind] == 1) { // tp regression
         int relIndex = cind - _num_CS_col;
         String[] gamCols = _gam_columns_sorted[cind];
-        double[] gamPred = grabPredictorVals(gamCols, rowData, _tpRowVals[relIndex]); // grabbing multiple predictors
+        double[] gamPred = grabPredictorVals(gamCols, rowData, _tpRowVals[relIndex], _gamColMeansRaw[relIndex], 
+                _oneOGamColStd[relIndex]); // grabbing multiple predictors
         if (gamPred == null) {
           dataIndEnd += _num_knots_sorted[cind];
           continue;
         }
         calculateDistance(_tpDistance[tpCounter], gamPred, _num_knots_sorted[cind], _knots[cind], _d[tpCounter],
-        _dEven[tpCounter], _constantTerms[tpCounter]); // calculate distance between row and knots, result in rowValues
+        _dEven[tpCounter], _constantTerms[tpCounter], _oneOGamColStd[tpCounter]); // calculate distance between row and knots, result in rowValues
         multArray(_tpDistance[tpCounter], _zTransposeCS[tpCounter], _tpDistzCS[tpCounter]); // distance * zCS
         calculatePolynomialBasis(_tpPoly[tpCounter], gamPred, _d[tpCounter], _M[tpCounter], _allPolyBasisList[tpCounter]);  // generate polynomial basis
         // concatenate distance zCS and poly basis.
@@ -222,13 +225,14 @@ public abstract class GamMojoModelBase extends MojoModel implements ConverterFac
     return dataWithGamifiedColumns;
   }
   
-  double[] grabPredictorVals(String[] gamCols, final RowData rowData, double[] predVals) {
+  double[] grabPredictorVals(String[] gamCols, final RowData rowData, double[] predVals, double[] gamColMeanRaw, double[] oneOGamStd) {
     int numCol = gamCols.length;
     for (int index = 0; index < numCol; index++) {
       Object data = rowData.get(gamCols[index]);
       if (data == null)
         return null;
-      predVals[index] = (data instanceof String) ? Double.parseDouble((String) data) : (double) data;
+      double temp = (data instanceof String) ? Double.parseDouble((String) data) : (double) data;
+      predVals[index] = (temp-gamColMeanRaw[index])*oneOGamStd[index];
     }
     return predVals;
   }
