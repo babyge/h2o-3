@@ -302,6 +302,8 @@ public class CoxPH extends ModelBuilder<CoxPHModel,CoxPHModel.CoxPHParameters,Co
       Vec[] vecs = train().vecs();
       String[] names = train().names();
 
+      System.out.println("names = " + Arrays.toString(names));
+
       for (int i = 0; i < names.length; i++) {
         if (names[i].equals(_parms._weights_column))
           weightVec = vecs[i];
@@ -567,9 +569,13 @@ public class CoxPH extends ModelBuilder<CoxPHModel,CoxPHModel.CoxPHParameters,Co
         final double[] time = CollectTimes.collect(_parms.stopVec(), _parms._single_node_mode);
 
         _job.update(0, "Initializing model training");
-
+        
+        
+        
         IcedHashMap<AstGroup.G, IcedInt> strataMap = new IcedHashMap<>();
         Frame f = reorderTrainFrameColumns(strataMap, time);
+
+        System.out.println("f = " + Arrays.toString(f.names()));
 
         int nResponses = (_parms.startVec() == null ? 2 : 3) + (_parms.isStratified() ? 1 : 0);
         final DataInfo dinfo = new DataInfo(f, null, nResponses, _parms._use_all_factor_levels, 
